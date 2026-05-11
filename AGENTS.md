@@ -175,7 +175,7 @@ Debugging this required reading serve logs — no user-visible indication that D
 
 ## Remaining work
 
-- [ ] Verify on live enterprise repo: 1st `find_impact` call triggers lazy find-refs, 2nd+ call < 100ms (cache hit)
+- [ ] Verify on live large repo: 1st `find_impact` call triggers lazy find-refs, 2nd+ call < 100ms (cache hit)
 - [ ] CI green on `csharp-integration-tests` job *(first run after push)*
 - [ ] Minor: warn if `--filter-project` passed to `find-refs` CLI (currently silently ignored)
 - [ ] Minor: `FindRefsOutput.Symbol` should be `init` not `set` (consistency)
@@ -251,7 +251,7 @@ Manueel te verifiëren (TUI). Gedeeltelijk getest via indirecte observatie:
 |---|-------|-----------|---------|
 | 3.1.1 | `"cache invalidation strategy"` | ✅ | `AbsoluteExpirationMemoryCache`, `SlidingExpirationMemoryCache`, `CachedSession`, `IdsCache` |
 | 3.1.2 | `"cleanup controller for digital assets"` | ✅ | `Cleanup/CleanupController.cs`, `CleanupMultipleFilesController.cs` |
-| 3.1.3 | `"enterprise client configuration"` | ✅ | `enterpriseClientBuilder.cs`, `enterpriseClient.cs`, `enterpriseConfig.cs` |
+| 3.1.3 | `"Vendor client configuration"` | ✅ | `VendorClientBuilder.cs`, `VendorClient.cs`, `VendorConfig.cs` |
 | 3.1.4 | `"search query builder for DAM"` | ✅ | `MoSearchQueryBuilder.cs` op positie 1 |
 | 3.1.5 | `"notification handling"` | ✅ | `Notification/` directory, `FishyAdamNotificationService`, `NotificationBuilder` |
 
@@ -271,7 +271,7 @@ Manueel te verifiëren (TUI). Gedeeltelijk getest via indirecte observatie:
 | 3.3.1 | `find definition, symbol="MoSearchQueryBuilder"` | ✅ | `ExampleProject.Dam/MoSearchQueryBuilder.cs` lijn 5 |
 | 3.3.2 | `find definition, symbol="ICache"` | ✅ | `Dam/Caches/ICache.cs` + `Core/Caching/ICache.cs` (twee implementaties) |
 | 3.3.3 | `find usages, symbol="CleanupController"` | ✅ | `CleanupCommand.cs` |
-| 3.3.4 | `find usages, symbol="enterpriseConfig"` | ✅ | 20+ client-constructors via `IOptionsMonitor<enterpriseConfig>` |
+| 3.3.4 | `find usages, symbol="VendorConfig"` | ✅ | 20+ client-constructors via `IOptionsMonitor<VendorConfig>` |
 
 #### 3.4 Explore — outline
 
@@ -345,7 +345,7 @@ Manueel te verifiëren (TUI). Gedeeltelijk getest via indirecte observatie:
 |---|------|-----------|-----------|
 | 6.1.1 | `group="myorg", query="cache provider"` | ✅ | ExampleOrg + ExampleOrg + ExampleOrg + ExampleOrg hits |
 | 6.1.2 | `group="myorg", query="MoSearchQueryBuilder"` | ✅ | Hits in ExampleOrg, ExampleOrg, ExampleOrg, ExampleOrg, ExampleOrg |
-| 6.1.3 | `find definition, group="myorg", symbol="enterpriseConfig"` | ⚠️ | `enterpriseConfig.cs` gevonden maar JavaScript (bootstrap.js) staat hoger in resultaten. Zie Bug B5. |
+| 6.1.3 | `find definition, group="myorg", symbol="VendorConfig"` | ⚠️ | `VendorConfig.cs` gevonden maar JavaScript (bootstrap.js) staat hoger in resultaten. Zie Bug B5. |
 | 6.1.4 | Geen scope | ✅ | `scope_required` error met lijst van alle projects en groups |
 | 6.1.5 | `project` + `group` tegelijk | ✅ | "Cannot specify both `project` and `group` — they are mutually exclusive." |
 
@@ -503,8 +503,8 @@ Manueel te verifiëren (TUI). Gedeeltelijk getest via indirecte observatie:
 
 **Ernst:** 🟠 Low  
 **Symptomen:**
-- `find(kind="definition", group="myorg", symbol="enterpriseConfig")` → top resultaten zijn JavaScript-functies uit `bootstrap.js`, niet de C# klasse
-- `enterpriseConfig.cs` staat wél in de resultaten, maar niet op positie 1
+- `find(kind="definition", group="myorg", symbol="VendorConfig")` → top resultaten zijn JavaScript-functies uit `bootstrap.js`, niet de C# klasse
+- `VendorConfig.cs` staat wél in de resultaten, maar niet op positie 1
 
 **Root cause:** Group-search aggregeert resultaten van alle taaltypen; JavaScript-bestanden scoren hoog doordat BM25 toevallig hoge frequentie heeft voor de tokenized naam.
 

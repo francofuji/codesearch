@@ -186,7 +186,7 @@ repositories.
   directory), the project root is correctly resolved to the worktree itself.
 - **Long UNC-path support** on Windows for repositories under `\\?\C:\…` paths.
 - **Repository groups** for cross-repo search across user-defined sets of
-  projects (e.g. all *.enterprise* repos).
+  projects (e.g. all related microservice repos).
 
 ### Changed
 

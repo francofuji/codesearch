@@ -156,7 +156,7 @@ public sealed class SymbolIndexer
         // where they are declared). External types live only in compiled DLLs — they have
         // no source locations at all. Filtering here eliminates thousands of framework
         // symbols before they even reach FindReferencesAsync, giving a 10-100× speedup
-        // on large solutions like enterprise.
+        // on large enterprise solutions.
         if (!type.Locations.Any(l => l.IsInSource))
             return;
 
