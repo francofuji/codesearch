@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **POST /reload endpoint** — forces `repos.json` reload from disk, even if
+  the file mtime hasn't changed. Used by the TUI `[s]` key to pick up
+  externally added/removed repos without restarting serve.
+- **TUI `[s]` key** — both embedded and remote TUIs now support `[s]` to
+  manually reload `repos.json`, picking up repos added via `codesearch index add`
+  or other external changes.
+- **CLI auto-register on 404** — `codesearch index -f` from a directory not
+  yet in `repos.json` now auto-registers the repo with the running serve
+  instance (via `POST /repos`) instead of falling back to local indexing,
+  which caused LMDB file-lock conflicts.
 - **`find_impact` MCP tool** — returns transitive call-sites and references for
   a symbol with file/line precision, enabling agents to plan refactors with
   IDE-class accuracy instead of relying on text-matching grep heuristics.
