@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **POST /reload endpoint** — forces `repos.json` reload from disk, even if
+  the file mtime hasn't changed. Used by the TUI `[s]` key to pick up
+  externally added/removed repos without restarting serve.
+- **TUI `[s]` key** — both embedded and remote TUIs now support `[s]` to
+  manually reload `repos.json`, picking up repos added via `codesearch index add`
+  or other external changes.
+- **CLI auto-register on 404** — `codesearch index -f` from a directory not
+  yet in `repos.json` now auto-registers the repo with the running serve
+  instance (via `POST /repos`) instead of falling back to local indexing,
+  which caused LMDB file-lock conflicts.
 - **Dedicated C# README** — all C#-specific goal, operation, installation, and
   testing instructions now live in `README_CSharp.md`; the main README only
   links there so non-C# users can skip the extra detail.
