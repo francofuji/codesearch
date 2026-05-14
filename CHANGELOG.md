@@ -46,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Clippy `unnecessary_sort_by`** — replaced `sort_by()` with `sort_by_key()`
   in two locations in `src/serve/mod.rs` to avoid lint failure on CI.
 
-## [Unreleased]
+## [1.0.95] - 2026-05-14
 
 ### Added
 
@@ -60,9 +60,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   yet in `repos.json` now auto-registers the repo with the running serve
   instance (via `POST /repos`) instead of falling back to local indexing,
   which caused LMDB file-lock conflicts.
-- **Dedicated C# README** — all C#-specific goal, operation, installation, and
-  testing instructions now live in `README_CSharp.md`; the main README only
-  links there so non-C# users can skip the extra detail.
+
+### Changed
+
+- **Removed vendor name references** from docs and comments for a cleaner
+  public repository.
+
+## [1.0.94] - 2026-05-08
+
+### Added
+
 - **C# semantic analysis helper (`scip-csharp`)** — a small .NET 10 CLI tool
   that wraps Roslyn's `SymbolFinder.FindReferencesAsync()` and produces a
   symbol reference index. Framework-dependent, ~5–15 MB. Bundled in the new
@@ -72,6 +79,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release archives total: 3 plain `codesearch` packages and 3
   `codesearch-with-csharp` packages (Windows, Linux, macOS). The plain
   packages are unchanged for users who don't need C# symbol references.
+- **Dedicated C# README** — all C#-specific goal, operation, installation, and
+  testing instructions now live in `README_CSharp.md`; the main README only
+  links there so non-C# users can skip the extra detail.
 - **`.cs` file watcher debounce** — 60-second quiet period after `.cs` file
   changes triggers an automatic symbol index rebuild. Buffer is cleared on git
   branch switches to avoid stale rebuilds.
@@ -79,8 +89,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`POST /repos/:alias/reindex?force=true&symbols=true`) for forced symbol
   index rebuilds.
 
+### Changed
+
+- **Architecture is language-agnostic**: the `SymbolIndexer` trait and
+  per-language adapter pattern are in place. Future branches can add Python
+  (scip-python), TypeScript (scip-typescript), Rust (scip-rust), etc. without
+  redesigning.
+
+### Breaking
+
+- **LMDB format change** — existing `scip` LMDB databases require a
+  full rebuild after this upgrade. The first `find_impact` call (or
+  explicit `reindex?symbols=true`) will trigger an automatic rebuild.
+  No manual data migration is needed.
+
 ### Fixed
 
+- **`status(projects)` now returns real chunk counts** for unopened repos by
+  persisting them in `metadata.json` after every indexing operation (B2).
+- **Double chunks on reindex** — guard clears both stores when `FileMetaStore`
+  is empty but `VectorStore` has data, preventing full duplication (B1).
+- **Regex `\w+`/`\b`/`\d` broken in literal mode** — extracts clean BM25 tokens
+  from regex patterns for candidate generation while preserving full regex for
+  post-filter (B3).
+- **Duplicate definitions in `find_impact`** — `FindCommonRoot` now uses all
+  solution projects instead of filtered subset for consistent relative paths (B4).
+- **`codesearch index` now always delegates to running serve** (not just `-f`),
+  preventing LMDB file-lock conflicts between CLI and serve.
+- **`release.ps1` path resolution** — fixed .NET `ReadAllText` resolving against
+  wrong CWD by using absolute paths derived from script location.
 - **JSON version validation** — `parse_json_index()` now rejects scip-csharp
   index versions other than `"1.0"`, preventing silent breakage when the
   helper is updated to an incompatible format.
@@ -103,20 +140,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scan with bincode deserialization.
 - **Removed `#[allow(dead_code)]`** on 5 SCIP constants in
   `constants.rs` that are now actively referenced from `csharp.rs`.
-
-### Breaking
-
-- **LMDB format change** — existing `scip` LMDB databases require a
-  full rebuild after this upgrade. The first `find_impact` call (or
-  explicit `reindex?symbols=true`) will trigger an automatic rebuild.
-  No manual data migration is needed.
-
-### Changed
-
-- **Architecture is language-agnostic**: the `SymbolIndexer` trait and
-  per-language adapter pattern are in place. Future branches can add Python
-  (scip-python), TypeScript (scip-typescript), Rust (scip-rust), etc. without
-  redesigning.
 
 ## [1.0.81] - 2026-05-02
 
@@ -239,6 +262,7 @@ repositories.
 - `codesearch serve` keeps one writer per database (LMDB invariant). Concurrent
   reindex from a second process is rejected.
 
+[1.0.95]: https://github.com/flupkede/codesearch/compare/v1.0.94...v1.0.95
 [1.0.94]: https://github.com/flupkede/codesearch/compare/v1.0.93...v1.0.94
 [1.0.93]: https://github.com/flupkede/codesearch/compare/v1.0.77...v1.0.93
 [1.0.77]: https://github.com/flupkede/codesearch/compare/v1.0.75...v1.0.77
