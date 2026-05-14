@@ -1731,24 +1731,14 @@ async fn try_delegate_reindex_to_serve(
             ));
         }
 
-        // Repo registered — retry the reindex POST
-        let retry_resp = client
-            .post(&url)
-            .send()
-            .await
-            .map_err(|e| format!("reindex retry POST failed: {}", e))?;
-
-        if retry_resp.status().is_success() {
-            tracing::info!("reindex retry succeeded for alias '{}'", alias);
-            return Ok((alias, project_path));
-        }
-
-        let retry_status = retry_resp.status();
-        let retry_body = retry_resp.text().await.unwrap_or_default();
-        Err(format!(
-            "reindex retry returned {} for alias '{}': {}",
-            retry_status, alias, retry_body
-        ))
+        // Auto-register returns 202 Accepted — indexing runs in background.
+        // No need to retry the reindex; the database will be created by the
+        // spawned background task.
+        tracing::info!(
+            "auto-register accepted for alias '{}', indexing in background",
+            alias
+        );
+        Ok((alias, project_path))
     } else {
         Err(format!(
             "serve returned {} for alias '{}': {}",

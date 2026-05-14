@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## [1.0.97] - 2026-05-15
+
+### Fixed
+
+- **CLI auto-register retry race** — after auto-registering a new repo (POST
+  `/repos` → 202 Accepted), the CLI no longer retries the reindex immediately.
+  The previous retry raced with the background indexing task and always failed
+  with "Database not found" because the LMDB database hadn't been created yet.
+- **`cargo fmt` CI failures** — pinned toolchain in `rust-toolchain.toml` and
+  updated local rustfmt (1.92 → 1.95) to match CI.
+
+
+
 ## [1.0.94] - 2026-05-08
 
 ### Fixed
@@ -275,6 +288,7 @@ repositories.
 - `codesearch serve` keeps one writer per database (LMDB invariant). Concurrent
   reindex from a second process is rejected.
 
+[1.0.97]: https://github.com/flupkede/codesearch/compare/v1.0.96...v1.0.97
 [1.0.96]: https://github.com/flupkede/codesearch/compare/v1.0.95...v1.0.96
 [1.0.95]: https://github.com/flupkede/codesearch/compare/v1.0.94...v1.0.95
 [1.0.94]: https://github.com/flupkede/codesearch/compare/v1.0.93...v1.0.94
