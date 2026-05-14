@@ -2328,7 +2328,11 @@ async fn add_repo_handler(
             .await
         {
             Ok(()) => {
-                tracing::info!("Index created for '{}' ({})", alias_bg, index_path.display());
+                tracing::info!(
+                    "Index created for '{}' ({})",
+                    alias_bg,
+                    index_path.display()
+                );
             }
             Err(e) => {
                 // Index failed — remove the config entry we just added

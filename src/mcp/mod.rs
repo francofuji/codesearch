@@ -1856,10 +1856,7 @@ mod tests {
     #[test]
     fn test_extract_bm25_query_from_regex_all_escapes() {
         // Pure escape classes → empty
-        assert_eq!(
-            super::extract_bm25_query_from_regex("\\w+"),
-            ""
-        );
+        assert_eq!(super::extract_bm25_query_from_regex("\\w+"), "");
     }
 
     #[test]
@@ -1874,10 +1871,7 @@ mod tests {
     #[test]
     fn test_extract_bm25_query_from_regex_bracket_class() {
         // "[a-z]+Cache" → "Cache" (bracket class stripped)
-        assert_eq!(
-            super::extract_bm25_query_from_regex("[a-z]+Cache"),
-            "Cache"
-        );
+        assert_eq!(super::extract_bm25_query_from_regex("[a-z]+Cache"), "Cache");
     }
 
     // ─── compute_literal_low_confidence tests ─────────────────────────
@@ -2515,8 +2509,14 @@ fn read_metadata_stats(db_path: &Path) -> (usize, usize) {
     let metadata_path = db_path.join("metadata.json");
     if let Ok(content) = std::fs::read_to_string(&metadata_path) {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-            let total_chunks = json.get("total_chunks").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let total_files = json.get("total_files").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let total_chunks = json
+                .get("total_chunks")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            let total_files = json
+                .get("total_files")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
             return (total_chunks, total_files);
         }
     }

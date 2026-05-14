@@ -178,8 +178,7 @@ async fn run_remote_tui_loop(
                     .unwrap_or(0);
                 if handle_key(key, &mut table_state, repo_count) {
                     // 's' pressed — trigger reload via HTTP
-                    let reload_url =
-                        format!("{}/reload", serve_url.trim_end_matches('/'));
+                    let reload_url = format!("{}/reload", serve_url.trim_end_matches('/'));
                     // Fire-and-forget POST; don't block the TUI loop
                     let _ = reqwest::Client::new()
                         .post(&reload_url)
