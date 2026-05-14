@@ -35,7 +35,12 @@ public sealed class SymbolIndexer
 
         // Collect all symbols across all projects
         var symbolMap = new Dictionary<ISymbol, string>(SymbolEqualityComparer.Default);
-        var projectRoot = FindCommonRoot(projects.Select(p => p.FilePath).Where(p => p != null).Cast<string>());
+        // Always compute root from ALL solution projects (not the filtered subset) so that
+        // relative paths are consistent between full and incremental rebuilds.
+        // Using only the filtered project would produce shorter paths (e.g. "Caches/ICache.cs")
+        // vs the full-rebuild paths ("src/ExampleProject.Dam/Caches/ICache.cs"),
+        // causing duplicate definitions in find_impact results.
+        var projectRoot = FindCommonRoot(solution.Projects.Select(p => p.FilePath).Where(p => p != null).Cast<string>());
 
         // Materialize project list once so we can log progress (i / total).
         var projectList = projects as IReadOnlyList<Project> ?? projects.ToList();
@@ -151,7 +156,7 @@ public sealed class SymbolIndexer
         // where they are declared). External types live only in compiled DLLs — they have
         // no source locations at all. Filtering here eliminates thousands of framework
         // symbols before they even reach FindReferencesAsync, giving a 10-100× speedup
-        // on large solutions like enterprise.
+        // on large enterprise solutions.
         if (!type.Locations.Any(l => l.IsInSource))
             return;
 

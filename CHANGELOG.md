@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## [1.0.94] - 2026-05-08
+
+### Fixed
+
+- **`status(projects)` now returns real chunk counts** for unopened repos by
+  persisting them in `metadata.json` after every indexing operation (B2).
+- **Double chunks on reindex** — guard clears both stores when `FileMetaStore`
+  is empty but `VectorStore` has data, preventing full duplication (B1).
+- **Regex `\w+`/`\b`/`\d` broken in literal mode** — extracts clean BM25 tokens
+  from regex patterns for candidate generation while preserving full regex for
+  post-filter (B3).
+- **Duplicate definitions in `find_impact`** — `FindCommonRoot` now uses all
+  solution projects instead of filtered subset for consistent relative paths (B4).
+- **`codesearch index` now always delegates to running serve** (not just `-f`),
+  preventing LMDB file-lock conflicts between CLI and serve.
+- **`release.ps1` path resolution** — fixed .NET `ReadAllText` resolving against
+  wrong CWD by using absolute paths derived from script location.
+
 ## [1.0.93] - 2026-05-08
 
 ### Changed
@@ -30,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **POST /reload endpoint** — forces `repos.json` reload from disk, even if
+  the file mtime hasn't changed. Used by the TUI `[s]` key to pick up
+  externally added/removed repos without restarting serve.
+- **TUI `[s]` key** — both embedded and remote TUIs now support `[s]` to
+  manually reload `repos.json`, picking up repos added via `codesearch index add`
+  or other external changes.
+- **CLI auto-register on 404** — `codesearch index -f` from a directory not
+  yet in `repos.json` now auto-registers the repo with the running serve
+  instance (via `POST /repos`) instead of falling back to local indexing,
+  which caused LMDB file-lock conflicts.
 - **Dedicated C# README** — all C#-specific goal, operation, installation, and
   testing instructions now live in `README_CSharp.md`; the main README only
   links there so non-C# users can skip the extra detail.
@@ -168,7 +198,7 @@ repositories.
   directory), the project root is correctly resolved to the worktree itself.
 - **Long UNC-path support** on Windows for repositories under `\\?\C:\…` paths.
 - **Repository groups** for cross-repo search across user-defined sets of
-  projects (e.g. all *.enterprise* repos).
+  projects (e.g. all related microservice repos).
 
 ### Changed
 
@@ -209,11 +239,9 @@ repositories.
 - `codesearch serve` keeps one writer per database (LMDB invariant). Concurrent
   reindex from a second process is rejected.
 
+[1.0.94]: https://github.com/flupkede/codesearch/compare/v1.0.93...v1.0.94
 [1.0.93]: https://github.com/flupkede/codesearch/compare/v1.0.77...v1.0.93
 [1.0.77]: https://github.com/flupkede/codesearch/compare/v1.0.75...v1.0.77
-[1.0.93]: https://github.com/flupkede/codesearch/compare/v1.0.77...v1.0.93
 [1.0.75]: https://github.com/flupkede/codesearch/compare/v1.0.74...v1.0.75
-[1.0.93]: https://github.com/flupkede/codesearch/compare/v1.0.77...v1.0.93
 [1.0.74]: https://github.com/flupkede/codesearch/compare/v1.0.72...v1.0.74
-[1.0.93]: https://github.com/flupkede/codesearch/compare/v1.0.77...v1.0.93
 [1.0.72]: https://github.com/flupkede/codesearch/releases/tag/v1.0.72
