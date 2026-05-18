@@ -850,8 +850,12 @@ impl ServeState {
                 RepoState::Warm { stores } => {
                     return Some(stores.clone());
                 }
-                RepoState::Readonly { stores } => {
-                    return Some(stores.clone());
+                RepoState::Readonly { .. } => {
+                    // Cannot force-reindex a readonly store; let the caller
+                    // fall through to try_open_stores(create_if_missing=true)
+                    // which will attempt a write-mode open (and fail with a
+                    // clear error if the write lock is still held).
+                    return None;
                 }
                 RepoState::Conflicted => return None,
             }
@@ -1444,8 +1448,8 @@ impl ServeState {
     }
 
     /// Record that a repo was just accessed (query or reindex).
-    /// Called from `get_or_open_stores(touch=true)`, and `reindex_handler`.
-    /// NOT called from `warmup_repo` — background warmup is not a real query.
+    /// Called from `get_or_open_stores(touch=true)`, `reindex_handler`,
+    /// `add_repo_handler`, and `warmup_repo` (after successful warmup).
     pub(crate) fn touch_access(&self, alias: &str) {
         self.last_access
             .insert(alias.to_string(), std::time::Instant::now());
