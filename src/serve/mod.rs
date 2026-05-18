@@ -2230,14 +2230,16 @@ struct AddRepoRequest {
     alias: Option<String>,
     /// Create a global index instead of local.
     #[serde(default)]
+    #[allow(dead_code)]
     global: bool,
 }
 
 /// Add-repo handler: POST /repos
 ///
-/// Registers a new repo in repos.json, spawns index creation + warmup in the
-/// background, and returns 202 Accepted immediately.  Indexing must not run
-/// inline because the serve's own startup may still hold the LMDB lock.
+/// Registers a new repo in repos.json, opens the LMDB/Tantivy stores inline
+/// (fast — prevents the double-open race from the old `index_quiet` path),
+/// then spawns a full reindex + vector index build + FSW start in the
+/// background. Returns 202 Accepted immediately.
 async fn add_repo_handler(
     axum::extract::State(state): axum::extract::State<Arc<ServeState>>,
     axum::extract::Json(body): axum::extract::Json<AddRepoRequest>,
@@ -2314,29 +2316,79 @@ async fn add_repo_handler(
         alias
     };
 
-    // Spawn index creation + warmup in the background to avoid blocking the
-    // HTTP handler.  Previously this ran inline, which caused a deadlock when
-    // the serve's own startup still held the LMDB lock (Phase 1).  Returning
-    // 202 Accepted immediately matches the pattern used by reindex_handler.
+    // Open stores INLINE (fast — just creates dirs + opens LMDB/Tantivy handles).
+    // This eliminates the LMDB double-open race that occurred when the old
+    // `index_quiet()` path opened its own LMDB handle, conflicting with
+    // `get_or_open_stores()` calls from the serve's request handlers.
+    let db_path = canonical_path.join(DB_DIR_NAME);
+    let dims = state.get_dimensions_for_path(&db_path);
+    let stores = match SharedStores::new(&db_path, dims) {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            // Clean up the config entry we just added
+            if let Ok(mut config) = state.config.write() {
+                config.unregister_alias(&alias);
+                let _ = config.save();
+            }
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::response::Json(json!({
+                    "error": format!("Failed to open database for '{}': {}", alias, e),
+                    "status": "error"
+                })),
+            );
+        }
+    };
+
+    // Store as Write immediately so get_or_open_stores() finds the repo in the
+    // fast-path and does NOT try to open a second LMDB handle on the same path.
     let cancel_token = CancellationToken::new();
-    let index_path = canonical_path.clone();
+    state.repos.insert(
+        alias.clone(),
+        RepoState::Write {
+            stores: stores.clone(),
+            index_manager: None,
+            cancel_token: cancel_token.clone(),
+        },
+    );
+    state.touch_access(&alias);
+
+    // Guard against concurrent reindex for the same alias.
+    if !state.active_reindexes.insert(alias.clone()) {
+        return (
+            StatusCode::CONFLICT,
+            axum::response::Json(json!({
+                "error": format!("Reindex already in progress for '{}'", alias),
+                "status": "conflict"
+            })),
+        );
+    }
+
+    // Spawn the heavy indexing work in the background.  Returns 202 immediately.
     let alias_bg = alias.clone();
     let state_bg = state.clone();
+    let project_path = canonical_path.clone();
 
     tokio::spawn(async move {
-        match crate::index::index_quiet(Some(index_path.clone()), false, body.global, cancel_token)
-            .await
-        {
+        tracing::info!(
+            "Indexing newly added repo '{}' ({}) in background",
+            alias_bg,
+            project_path.display()
+        );
+
+        match IndexManager::force_reindex_with_stores(&project_path, &db_path, &stores).await {
             Ok(()) => {
                 tracing::info!(
                     "Index created for '{}' ({})",
                     alias_bg,
-                    index_path.display()
+                    project_path.display()
                 );
             }
             Err(e) => {
-                // Index failed — remove the config entry we just added
                 tracing::error!("Index creation failed for '{}': {}", alias_bg, e);
+                // Clean up: remove from repos and config
+                state_bg.repos.remove(&alias_bg);
+                state_bg.active_reindexes.remove(&alias_bg);
                 if let Ok(mut config) = state_bg.config.write() {
                     config.unregister_alias(&alias_bg);
                     let _ = config.save();
@@ -2345,10 +2397,19 @@ async fn add_repo_handler(
             }
         }
 
-        // Warmup the repo (opens DB, builds vector index, stores as Warm)
-        if let Err(e) = state_bg.warmup_repo(&alias_bg).await {
-            tracing::warn!("Warmup failed for newly added repo '{}': {}", alias_bg, e);
+        // Build vector index from freshly indexed data
+        {
+            let mut vstore = stores.vector_store.write().await;
+            if let Err(e) = vstore.build_index() {
+                tracing::warn!("Failed to build vector index for '{}': {}", alias_bg, e);
+            }
         }
+
+        // Start FSW and transition to proper Write state with IndexManager
+        state_bg.restart_fsw(&alias_bg, stores).await;
+
+        state_bg.active_reindexes.remove(&alias_bg);
+        tracing::info!("Repo '{}' fully indexed and ready", alias_bg);
     });
 
     (
