@@ -1,4 +1,4 @@
-//! `codesearch serve` — MCP streamable HTTP server mode.
+﻿//! `codesearch serve` — MCP streamable HTTP server mode.
 //!
 //! Binds on `127.0.0.1:{port}` and serves:
 //! - `GET /health` → JSON health check
@@ -140,10 +140,10 @@ impl std::fmt::Debug for RepoState {
     }
 }
 
-/// Result of [].
+/// Result of [`ServeState::try_open_stores`].
 ///
-/// - : opened in write mode; NOT yet registered in . Caller decides state.
-/// - : opened in readonly mode; ALREADY registered as .
+/// - [`OpenedStores::Write`]: opened in write mode; NOT yet registered in `repos`. Caller decides state.
+/// - [`OpenedStores::Readonly`]: opened in readonly mode; ALREADY registered as [`RepoState::Readonly`].
 pub(crate) enum OpenedStores {
     Write(Arc<SharedStores>),
     Readonly(Arc<SharedStores>),
@@ -981,7 +981,12 @@ impl ServeState {
 
         // Open stores: existence check + write/readonly/conflicted logic.
         let stores = match self.try_open_stores(alias, &db_path, false)? {
-            OpenedStores::Readonly(_) => return Ok(()), // already registered
+            OpenedStores::Readonly(_) => {
+                // Already registered as Readonly by try_open_stores.
+                // Touch so the idle reaper can evict this handle.
+                self.touch_access(alias);
+                return Ok(());
+            }
             OpenedStores::Write(s) => s,
         };
 
@@ -1328,7 +1333,8 @@ impl ServeState {
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
             return Err(format!(
-                "Database not found at {}. This usually means the repo was removed externally.                  Run codesearch index add {} to recreate, or codesearch index rm {} to clean up the config entry.",
+                "Database not found at {}. This usually means the repo was removed externally. \
+                 Run `codesearch index add {}` to recreate, or `codesearch index rm {}` to clean up the config entry.",
                 db_path.display(),
                 parent,
                 parent
@@ -2388,6 +2394,10 @@ async fn add_repo_handler(
 
     // Guard against concurrent reindex for the same alias.
     if !state.active_reindexes.insert(alias.clone()) {
+        // Clean up the Write registration + cancel the token we just created,
+        // so the leaked LMDB handle is released and the alias reverts to Conflicted.
+        cancel_token.cancel();
+        state.repos.remove(&alias);
         return (
             StatusCode::CONFLICT,
             axum::response::Json(json!({
