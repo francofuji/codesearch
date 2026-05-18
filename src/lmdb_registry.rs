@@ -51,22 +51,25 @@ fn register(path: &Path, description: &str) -> Result<PathBuf> {
         .canonicalize()
         .with_context(|| format!("Cannot canonicalize LMDB path: {}", path.display()))?;
 
-    if let Some(existing) = registry.get(&canonical) {
-        anyhow::bail!(
-            "LMDB double-open prevented: {} is already open ({}, opened {:.1}s ago)",
-            canonical.display(),
-            existing.description,
-            existing.opened_at.elapsed().as_secs_f64()
-        );
+    // Use DashMap's atomic entry API to prevent TOCTOU race between check+insert.
+    use dashmap::mapref::entry::Entry;
+    match registry.entry(canonical.clone()) {
+        Entry::Occupied(existing) => {
+            let entry = existing.get();
+            anyhow::bail!(
+                "LMDB double-open prevented: {} is already open ({}, opened {:.1}s ago)",
+                canonical.display(),
+                entry.description,
+                entry.opened_at.elapsed().as_secs_f64()
+            );
+        }
+        Entry::Vacant(slot) => {
+            slot.insert(LmdbEntry {
+                description: description.to_string(),
+                opened_at: Instant::now(),
+            });
+        }
     }
-
-    registry.insert(
-        canonical.clone(),
-        LmdbEntry {
-            description: description.to_string(),
-            opened_at: Instant::now(),
-        },
-    );
 
     Ok(canonical)
 }
@@ -146,12 +149,17 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn make_opts() -> heed::EnvOpenOptions {
+        let mut opts = heed::EnvOpenOptions::new();
+        opts.map_size(1024 * 1024).max_dbs(1);
+        opts
+    }
+
     #[test]
     fn test_registry_prevents_double_open() {
         let dir = TempDir::new().unwrap();
         let path = dir.path();
-
-        let opts = heed::EnvOpenOptions::new().map_size(1024 * 1024).max_dbs(1);
+        let opts = make_opts();
 
         // First open should succeed
         let _env1 = unsafe { TrackedEnv::open(&opts, path, "test-1").unwrap() };
@@ -168,8 +176,7 @@ mod tests {
     fn test_registry_allows_reopen_after_drop() {
         let dir = TempDir::new().unwrap();
         let path = dir.path();
-
-        let opts = heed::EnvOpenOptions::new().map_size(1024 * 1024).max_dbs(1);
+        let opts = make_opts();
 
         {
             let _env1 = unsafe { TrackedEnv::open(&opts, path, "test-1").unwrap() };
@@ -184,8 +191,7 @@ mod tests {
     fn test_different_paths_both_allowed() {
         let dir1 = TempDir::new().unwrap();
         let dir2 = TempDir::new().unwrap();
-
-        let opts = heed::EnvOpenOptions::new().map_size(1024 * 1024).max_dbs(1);
+        let opts = make_opts();
 
         let _env1 = unsafe { TrackedEnv::open(&opts, dir1.path(), "test-1").unwrap() };
         let _env2 = unsafe { TrackedEnv::open(&opts, dir2.path(), "test-2").unwrap() };
