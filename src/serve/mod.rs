@@ -140,6 +140,15 @@ impl std::fmt::Debug for RepoState {
     }
 }
 
+/// Result of [].
+///
+/// - : opened in write mode; NOT yet registered in . Caller decides state.
+/// - : opened in readonly mode; ALREADY registered as .
+pub(crate) enum OpenedStores {
+    Write(Arc<SharedStores>),
+    Readonly(Arc<SharedStores>),
+}
+
 /// Shared state for the serve mode.
 pub(crate) struct ServeState {
     /// Repo alias → opened stores (or conflicted marker).
@@ -970,42 +979,10 @@ impl ServeState {
 
         let db_path = path.join(DB_DIR_NAME);
 
-        // Database existence precheck — don't cache missing DB as Conflicted
-        if !db_path.exists() {
-            return Err(format!(
-                "Database not found at {}. This usually means the repo was removed externally. \
-                 Run `codesearch index add {}` to recreate, or `codesearch index rm {}` to clean up the config entry.",
-                db_path.display(), path.display(), path.display()
-            ));
-        }
-
-        // Read dimensions from metadata
-        let dims = self.get_dimensions_for_path(&db_path);
-
-        // Try write-mode first, then readonly
-        let stores = match SharedStores::new(&db_path, dims) {
-            Ok(s) => {
-                info!("Warmup '{}': opened in write mode", alias);
-                s
-            }
-            Err(_) => match SharedStores::new_readonly(&db_path, dims) {
-                Ok(s) => {
-                    info!("Warmup '{}': opened in readonly mode", alias);
-                    let stores_arc = Arc::new(s);
-                    self.repos.insert(
-                        alias.to_string(),
-                        RepoState::Readonly {
-                            stores: stores_arc.clone(),
-                        },
-                    );
-                    return Ok(());
-                }
-                Err(e) => {
-                    warn!("Warmup '{}': failed to open: {}", alias, e);
-                    self.repos.insert(alias.to_string(), RepoState::Conflicted);
-                    return Err(Self::conflicted_msg(alias));
-                }
-            },
+        // Open stores: existence check + write/readonly/conflicted logic.
+        let stores = match self.try_open_stores(alias, &db_path, false)? {
+            OpenedStores::Readonly(_) => return Ok(()), // already registered
+            OpenedStores::Write(s) => s,
         };
 
         // Build vector index from existing data
@@ -1026,7 +1003,7 @@ impl ServeState {
             }
         }
 
-        let stores_arc = Arc::new(stores);
+        let stores_arc = stores;
 
         if let Err(e) =
             IndexManager::perform_incremental_refresh_with_stores(&path, &db_path, &stores_arc)
@@ -1128,47 +1105,14 @@ impl ServeState {
 
         let db_path = path.join(DB_DIR_NAME);
 
-        // Database existence precheck — don't cache missing DB as Conflicted
-        if !db_path.exists() {
-            return Err(format!(
-                "Database not found at {}. This usually means the repo was removed externally. \
-                 Run `codesearch index add {}` to recreate, or `codesearch index rm {}` to clean up the config entry.",
-                db_path.display(), path.display(), path.display()
-            ));
-        }
-
-        // Read dimensions from metadata
-        let dims = self.get_dimensions_for_path(&db_path);
-
-        // Try write-mode first, then readonly
-        let stores = match SharedStores::new(&db_path, dims) {
-            Ok(s) => {
-                info!("Opened repo '{}' in write mode", alias);
-                s
+        // Open stores: existence check + write/readonly/conflicted logic.
+        let stores = match self.try_open_stores(alias, &db_path, false)? {
+            OpenedStores::Readonly(s) => {
+                // Already registered as Readonly; touch and return.
+                self.touch_access(alias);
+                return Ok(s);
             }
-            Err(_) => {
-                // Try readonly
-                match SharedStores::new_readonly(&db_path, dims) {
-                    Ok(s) => {
-                        info!("Opened repo '{}' in readonly mode", alias);
-                        let stores_arc = Arc::new(s);
-                        self.repos.insert(
-                            alias.to_string(),
-                            RepoState::Readonly {
-                                stores: stores_arc.clone(),
-                            },
-                        );
-                        // Always update last_access so the reaper can evict.
-                        self.touch_access(alias);
-                        return Ok(stores_arc);
-                    }
-                    Err(e) => {
-                        warn!("Failed to open repo '{}': {}", alias, e);
-                        self.repos.insert(alias.to_string(), RepoState::Conflicted);
-                        return Err(Self::conflicted_msg(alias));
-                    }
-                }
-            }
+            OpenedStores::Write(s) => s,
         };
 
         // Ensure the HNSW vector index is built from existing data.
@@ -1192,7 +1136,7 @@ impl ServeState {
             }
         }
 
-        let stores_arc = Arc::new(stores);
+        let stores_arc = stores;
 
         // Fan-out / candidate-detection callers pass touch=false.
         // Open as Warm only — no FSW, no IndexManager overhead.
@@ -1366,6 +1310,65 @@ impl ServeState {
             }
         }
         crate::constants::DEFAULT_EMBEDDING_DIMENSIONS // default
+    }
+
+    /// Opens (or creates) LMDB/Tantivy stores for the repo at db_path.
+    ///
+    /// create_if_missing=false: warmup / incremental reindex path.
+    /// create_if_missing=true:  force-reindex / add-repo path, creates fresh DB.
+    fn try_open_stores(
+        &self,
+        alias: &str,
+        db_path: &Path,
+        create_if_missing: bool,
+    ) -> std::result::Result<OpenedStores, String> {
+        if !db_path.exists() && !create_if_missing {
+            let parent = db_path
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            return Err(format!(
+                "Database not found at {}. This usually means the repo was removed externally.                  Run codesearch index add {} to recreate, or codesearch index rm {} to clean up the config entry.",
+                db_path.display(),
+                parent,
+                parent
+            ));
+        }
+
+        let dims = self.get_dimensions_for_path(db_path);
+
+        match SharedStores::new(db_path, dims) {
+            Ok(s) => {
+                info!("Opened repo in write mode: {}", alias);
+                Ok(OpenedStores::Write(Arc::new(s)))
+            }
+            Err(write_err) => {
+                if create_if_missing {
+                    return Err(format!(
+                        "Failed to open/create database for {}: {}",
+                        alias, write_err
+                    ));
+                }
+                match SharedStores::new_readonly(db_path, dims) {
+                    Ok(s) => {
+                        info!("Opened repo in readonly mode: {}", alias);
+                        let stores_arc = Arc::new(s);
+                        self.repos.insert(
+                            alias.to_string(),
+                            RepoState::Readonly {
+                                stores: stores_arc.clone(),
+                            },
+                        );
+                        Ok(OpenedStores::Readonly(stores_arc))
+                    }
+                    Err(e) => {
+                        warn!("Failed to open repo {}: {}", alias, e);
+                        self.repos.insert(alias.to_string(), RepoState::Conflicted);
+                        Err(Self::conflicted_msg(alias))
+                    }
+                }
+            }
+        }
     }
 
     /// Get all registered aliases.
@@ -2119,9 +2122,37 @@ async fn reindex_handler(
         let stores = match state.stop_fsw(&alias) {
             Some(s) => s,
             None => {
-                // FSW not running -- try opening normally
-                match state.get_or_open_stores(&alias, true).await {
-                    Ok(s) => s,
+                // FSW not running -- open existing or create fresh DB.
+                // create_if_missing=true so a force-reindex can recover a deleted DB.
+                let cancel = CancellationToken::new();
+                match state.try_open_stores(&alias, &db_path, true) {
+                    Ok(OpenedStores::Write(s)) => {
+                        // Register as Write to block double-open races while we reindex.
+                        state.repos.insert(
+                            alias.clone(),
+                            RepoState::Write {
+                                stores: s.clone(),
+                                index_manager: None,
+                                cancel_token: cancel,
+                            },
+                        );
+                        state.touch_access(&alias);
+                        s
+                    }
+                    Ok(OpenedStores::Readonly(_)) => {
+                        // Cannot force-reindex against a readonly store.
+                        state.active_reindexes.remove(&guard_alias);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::response::Json(json!({
+                                "error": format!(
+                                    "Repo {} could only be opened read-only; cannot force-reindex",
+                                    alias
+                                ),
+                                "status": "error"
+                            })),
+                        );
+                    }
                     Err(e) => {
                         state.active_reindexes.remove(&guard_alias);
                         return (
@@ -2316,14 +2347,16 @@ async fn add_repo_handler(
         alias
     };
 
-    // Open stores INLINE (fast — just creates dirs + opens LMDB/Tantivy handles).
+    // Open stores INLINE (fast -- just creates dirs + opens LMDB/Tantivy handles).
     // This eliminates the LMDB double-open race that occurred when the old
-    // `index_quiet()` path opened its own LMDB handle, conflicting with
-    // `get_or_open_stores()` calls from the serve's request handlers.
+    //  path opened its own LMDB handle, conflicting with
+    //  calls from the serve's request handlers.
     let db_path = canonical_path.join(DB_DIR_NAME);
-    let dims = state.get_dimensions_for_path(&db_path);
-    let stores = match SharedStores::new(&db_path, dims) {
-        Ok(s) => Arc::new(s),
+    let stores = match state.try_open_stores(&alias, &db_path, true) {
+        Ok(OpenedStores::Write(s)) => s,
+        Ok(OpenedStores::Readonly(_)) => {
+            unreachable!("try_open_stores(create_if_missing=true) never returns Readonly")
+        }
         Err(e) => {
             // Clean up the config entry we just added
             if let Ok(mut config) = state.config.write() {
@@ -2333,7 +2366,7 @@ async fn add_repo_handler(
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 axum::response::Json(json!({
-                    "error": format!("Failed to open database for '{}': {}", alias, e),
+                    "error": format!("Failed to open database for {}: {}", alias, e),
                     "status": "error"
                 })),
             );
