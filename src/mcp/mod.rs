@@ -5177,6 +5177,67 @@ impl CodesearchService {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
+    /// Fetch outline items for an already-normalised absolute path.
+    ///
+    /// Returns `Ok(vec![])` when no chunks match; `Err` only on I/O failures.
+    async fn outline_items_for_normalized(
+        &self,
+        normalized: &str,
+        ctx: &MultiStoreContext,
+    ) -> anyhow::Result<Vec<FileOutlineItem>> {
+        if let Some(ref sv) = ctx.stores_vec {
+            let mut all_items: Vec<FileOutlineItem> = Vec::new();
+            let mut seen_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+            for store_arc in sv {
+                let store = store_arc.vector_store.read().await;
+                match store.chunks_for_file(normalized) {
+                    Ok(metas) => {
+                        for c in metas {
+                            if seen_ids.insert(c.id) {
+                                all_items.push(FileOutlineItem {
+                                    chunk_id: c.id,
+                                    kind: c.kind,
+                                    signature: c.signature,
+                                    start_line: c.start_line,
+                                    end_line: c.end_line,
+                                });
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Vector store read failed in outline_items_for_normalized fan-out: {:?}",
+                            e
+                        );
+                    }
+                }
+            }
+            all_items.sort_by_key(|i| i.start_line);
+            Ok(all_items)
+        } else {
+            let normalized_owned = normalized.to_string();
+            self.with_vector_store_read_for(
+                move |store| {
+                    let mut out: Vec<FileOutlineItem> = store
+                        .chunks_for_file(&normalized_owned)?
+                        .into_iter()
+                        .map(|c| FileOutlineItem {
+                            chunk_id: c.id,
+                            kind: c.kind,
+                            signature: c.signature,
+                            start_line: c.start_line,
+                            end_line: c.end_line,
+                        })
+                        .collect();
+                    out.sort_by_key(|i| i.start_line);
+                    Ok(out)
+                },
+                ctx.stores.clone(),
+            )
+            .await
+        }
+    }
+
     async fn file_outline(
         &self,
         Parameters(request): Parameters<FileOutlineRequest>,
@@ -5219,64 +5280,35 @@ impl CodesearchService {
         let stripped_path = strip_alias_prefix(&request.path, ctx.project_alias.as_ref());
         let normalized = normalize_tool_path(&stripped_path, &project_root);
 
-        let items = if let Some(ref sv) = ctx.stores_vec {
-            // Multi-store group fan-out: collect outline items from all stores
-            let mut all_items: Vec<FileOutlineItem> = Vec::new();
-            let mut seen_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
-            for store_arc in sv {
-                let store = store_arc.vector_store.read().await;
-                match store.chunks_for_file(&normalized) {
-                    Ok(metas) => {
-                        for c in metas {
-                            if seen_ids.insert(c.id) {
-                                all_items.push(FileOutlineItem {
-                                    chunk_id: c.id,
-                                    kind: c.kind,
-                                    signature: c.signature,
-                                    start_line: c.start_line,
-                                    end_line: c.end_line,
-                                });
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Vector store read failed in file_outline fan-out: {:?}", e);
-                    }
-                }
-            }
-            all_items.sort_by_key(|i| i.start_line);
-            all_items
-        } else {
-            match self
-                .with_vector_store_read_for(
-                    |store| {
-                        let mut out: Vec<FileOutlineItem> = store
-                            .chunks_for_file(&normalized)?
-                            .into_iter()
-                            .map(|c| FileOutlineItem {
-                                chunk_id: c.id,
-                                kind: c.kind,
-                                signature: c.signature,
-                                start_line: c.start_line,
-                                end_line: c.end_line,
-                            })
-                            .collect();
-                        out.sort_by_key(|i| i.start_line);
-                        Ok(out)
-                    },
-                    ctx.stores.clone(),
-                )
-                .await
-            {
-                Ok(items) => items,
-                Err(e) => {
-                    return Ok(CallToolResult::success(vec![Content::text(format!(
-                        "Error reading outline: {}",
-                        e
-                    ))]));
-                }
+        let mut items = match self.outline_items_for_normalized(&normalized, &ctx).await {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Error reading outline: {}",
+                    e
+                ))]));
             }
         };
+
+        // Two-pass fallback: if alias-stripping changed the path and yielded no results,
+        // try the original un-stripped path. Handles the case where the project alias
+        // matches a package subdirectory name (e.g. project "aprimo_mcp" with target
+        // "aprimo_mcp/config.py" → after strip becomes "config.py" which is wrong;
+        // the correct relative path is "aprimo_mcp/config.py").
+        if items.is_empty() && stripped_path != request.path {
+            let normalized_orig = normalize_tool_path(&request.path, &project_root);
+            if normalized_orig != normalized {
+                tracing::debug!(
+                    "file_outline: primary '{}' empty, trying fallback '{}'",
+                    normalized,
+                    normalized_orig
+                );
+                items = self
+                    .outline_items_for_normalized(&normalized_orig, &ctx)
+                    .await
+                    .unwrap_or_default();
+            }
+        }
 
         if items.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(
