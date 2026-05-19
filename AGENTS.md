@@ -85,18 +85,19 @@ Missing helper disables `find_impact` for C# only — all other features keep wo
 
 The trait includes `as_any()` for downcasting to concrete types (needed for Phase 3 pre-warm which calls `CSharpSymbolIndexer::prewarm_ref_cache()`).
 
-## Current commit state (2026-05-06)
+## Current commit state (2026-05-19)
 
-Latest commits on `features/symbol-references`:
+Branch: `develop`
+
+Latest commits:
+- `ec83eaf` fix: review remarks on outline_items_for_normalized (doc + warn log)
+- `d09b178` fix: explore two-pass fallback when alias name matches package subdir
+- `1527dd6` Merge pull request #54 (stop_fsw returns None for Readonly)
+- `f2680c7` fix: stop_fsw returns None for Readonly, update stale doc comments
 - `35bbf36` fix: review remarks (double-Env, partial-class merge, META_SYMBOL_COUNT, temp collision)
-- `bb8c1c8` feat: Opt1+2+3 — filter external types, lazy refs, incremental merge
-- `6fc7861` feat: live progress streaming from scip-csharp (stage 6)
-- `88a8f01` fix: ordering + concurrency default=2 (stage 5)
-- `becc518` fix: IncludeAllContentForSelfExtract + MSBuild registration (stage 4)
-- `4ed0a3f` fix: applies_to + non-C# repos red TUI (stage 3)
 
-**Status**: `cargo check` + `cargo clippy` clean, `dotnet build` clean.
-**Deployed**: Run `..\copy-to-common.ps1` to deploy to `~/.local/bin/`.
+**Status**: `cargo check` + `cargo clippy` clean. **Deployed as v1.0.113**.
+**To redeploy**: Run `..\copy-to-common.ps1`.
 
 ## Known Bugs (field-tested 2026-05-07 on ExampleRepo)
 
