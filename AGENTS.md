@@ -33,6 +33,7 @@ Add symbol-aware reference lookups to codesearch via `find_impact` MCP tool. Ret
 - **Phase 3 pre-warm** — after Phase 2 definitions, `scip-csharp batch-find-refs` resolves all uncached symbols in a single workspace session; controlled by `CSHARP_PREWARM_ENABLED` env (default: true)
 - **`index symbol` CLI** — `codesearch index symbol [-f] <alias>` for symbol-only rebuild; `--symbols` flag on `index -f` for combined text+symbol rebuild
 - **Watcher .csproj grouping** — changed .cs files grouped by .csproj, incremental rebuild per project instead of full solution
+- **SCIP LMDB map_size 512 MB** — increased from 64 MB (was causing `MDB_MAP_FULL` on enterprise repos when Phase-3 ref_cache exceeded 64 MB); override with `CODESEARCH_SCIP_LMDB_MAP_MB` env var; virtual address space only (no RAM cost on pages not written)
 
 ## Architecture
 
