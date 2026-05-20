@@ -97,15 +97,8 @@ Latest commits:
 - `df00c01` docs: update AGENTS.md — commit state + v1.0.113 deployed
 - `ec83eaf` fix: review remarks on outline_items_for_normalized
 
-**Status**: `cargo check` + `cargo clippy` clean. **Deployed as v1.0.119**.
+**Status**: `cargo check` + `cargo clippy` clean. **Deployed as v1.0.120** (pre-commit hook auto-bumped).
 **To redeploy**: Run `..\copy-to-common.ps1`.
-
-### Pending on this branch
-
-- Phase 3 pre-warm TUI feedback: `csharp_index_status` now set to `Indexing` before `batch-find-refs`
-  and restored to `Ready` after — TUI shows `C#…` throughout Phase 3 (not just `◐ warm C#·`).
-- Phase 2 queued-candidates pre-mark: all candidates are marked `C#…` before semaphore is acquired,
-  so repos waiting in queue show the C# indexing indicator immediately.
 
 ## Known Bugs (field-tested 2026-05-07 on ExampleRepo)
 
