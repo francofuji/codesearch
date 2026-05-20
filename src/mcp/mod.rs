@@ -7726,7 +7726,7 @@ pub async fn run_mcp_server(
                     // Step 2: AFTER refresh completes, start file watcher (also writes to stores)
                     tracing::info!("👀 Starting file watcher...");
                     if let Err(e) = index_manager_arc
-                        .start_file_watcher(bg_cancel_token, None)
+                        .start_file_watcher(bg_cancel_token, None, None)
                         .await
                     {
                         tracing::error!("❌ Failed to start file watcher: {}", e);

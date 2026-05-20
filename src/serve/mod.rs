@@ -1,4 +1,4 @@
-﻿//! `codesearch serve` — MCP streamable HTTP server mode.
+//! `codesearch serve` — MCP streamable HTTP server mode.
 //!
 //! Binds on `127.0.0.1:{port}` and serves:
 //! - `GET /health` → JSON health check
@@ -39,7 +39,7 @@ use crate::constants::{
     REPO_IDLE_TIMEOUT_SECS, SERVE_PORT_ENV, STATUS_PATH,
 };
 use crate::db_discovery::repos::ReposConfig;
-use crate::index::{CSharpRebuildNotifier, IndexManager, SharedStores};
+use crate::index::{CSharpRebuildNotifier, IndexManager, IndexingStatusCallback, SharedStores};
 use crate::mcp::types::HealthResponse;
 use crate::symbols::{csharp, RebuildScope, SymbolIndexerRegistry};
 /// Lightweight repo status label derived from DashMap state only (no DB opens).
@@ -262,6 +262,24 @@ impl ServeState {
                     error_map.insert(alias_key.clone(), msg);
                 }
                 status_map.insert(alias_key.clone(), CSharpIndexStatus::Error);
+            }
+        })
+    }
+
+    /// Build an `IndexingStatusCallback` for the given repo `alias`.
+    ///
+    /// The callback captures an `Arc` clone of `active_reindexes` so it can be sent
+    /// into the file-watcher background task. When the watcher triggers a refresh
+    /// (branch change, significant batch), it calls this closure to insert/remove
+    /// the alias — making "Indexing" visible in the TUI.
+    fn make_indexing_status_callback(&self, alias: &str) -> IndexingStatusCallback {
+        let reindexes = self.active_reindexes.clone();
+        let alias_key = alias.to_string();
+        Arc::new(move |active: bool| {
+            if active {
+                reindexes.insert(alias_key.clone());
+            } else {
+                reindexes.remove(&alias_key);
             }
         })
     }
@@ -541,6 +559,19 @@ impl ServeState {
             let db_path = path.join(DB_DIR_NAME);
             let (needs, reason) = self.evaluate_csharp_rebuild(alias, &path, &db_path);
             if !needs {
+                // If the SCIP index exists and is fresh, mark C# status as Ready
+                // so the TUI shows the C# indicator (e.g. "C#·") instead of None.
+                if reason == "fresh, last_scip>=last_changed" {
+                    let mut status = self
+                        .csharp_index_status
+                        .get(alias)
+                        .map(|e| *e.value())
+                        .unwrap_or(CSharpIndexStatus::None);
+                    if matches!(status, CSharpIndexStatus::None) {
+                        status = CSharpIndexStatus::Ready;
+                    }
+                    self.csharp_index_status.insert(alias.to_string(), status);
+                }
                 info!("phase-2: skip '{}' — {}", alias, reason);
                 continue;
             }
@@ -902,6 +933,7 @@ impl ServeState {
                 let im_for_task = im_arc.clone();
                 let token_for_task = token.clone();
                 let notifier = self.make_csharp_notifier(alias);
+                let indexing_cb = self.make_indexing_status_callback(alias);
 
                 tokio::spawn(async move {
                     if let Err(e) = im_for_task.start_watching().await {
@@ -923,7 +955,7 @@ impl ServeState {
                     }
 
                     if let Err(e) = im_for_task
-                        .start_file_watcher(token_for_task, Some(notifier))
+                        .start_file_watcher(token_for_task, Some(notifier), Some(indexing_cb))
                         .await
                     {
                         tracing::error!("File watcher for '{}' stopped: {}", alias_bg, e);
@@ -1175,6 +1207,7 @@ impl ServeState {
                     let im_for_task = im_arc.clone();
                     let token_for_task = token.clone();
                     let notifier = self.make_csharp_notifier(alias);
+                    let indexing_cb = self.make_indexing_status_callback(alias);
 
                     tokio::spawn(async move {
                         // Pre-start FSW so changes during initial refresh aren't lost
@@ -1199,7 +1232,7 @@ impl ServeState {
 
                         // Main file watcher loop — runs until cancel_token fires
                         if let Err(e) = im_for_task
-                            .start_file_watcher(token_for_task, Some(notifier))
+                            .start_file_watcher(token_for_task, Some(notifier), Some(indexing_cb))
                             .await
                         {
                             tracing::error!("File watcher for '{}' stopped: {}", alias_clone, e);
@@ -1249,6 +1282,7 @@ impl ServeState {
         let path_bg = project_path.to_path_buf();
         let stores_bg = stores.clone();
         let notifier = self.make_csharp_notifier(alias);
+        let indexing_cb = self.make_indexing_status_callback(alias);
 
         let cancel_token = CancellationToken::new();
         let token_for_task = cancel_token.clone();
@@ -1282,7 +1316,7 @@ impl ServeState {
                     }
 
                     if let Err(e) = im_for_task
-                        .start_file_watcher(token_for_task, Some(notifier))
+                        .start_file_watcher(token_for_task, Some(notifier), Some(indexing_cb))
                         .await
                     {
                         tracing::error!("Lazy FSW for '{}' stopped: {}", alias_bg, e);
@@ -1958,6 +1992,9 @@ async fn trigger_symbol_rebuild(
     state
         .csharp_index_status
         .insert(alias.to_string(), CSharpIndexStatus::Indexing);
+    // Mark as actively indexing so the TUI status column shows "Indexing"
+    // (not just the C# indicator). This mirrors what reindex_handler does.
+    state.active_reindexes.insert(alias.to_string());
     let rp = project_path.to_path_buf();
     let dp = db_path.to_path_buf();
     let alias_owned = alias.to_string();
@@ -1981,6 +2018,7 @@ async fn trigger_symbol_rebuild(
                 summary.references_stored,
                 summary.duration_ms
             );
+            state.active_reindexes.remove(&alias_owned);
             state
                 .csharp_index_status
                 .insert(alias_owned.clone(), CSharpIndexStatus::Ready);
@@ -1993,6 +2031,7 @@ async fn trigger_symbol_rebuild(
         }
         Ok(Err(e)) => {
             tracing::error!("❌ Symbol rebuild failed for '{}': {}", alias_owned, e);
+            state.active_reindexes.remove(&alias_owned);
             state
                 .csharp_index_error
                 .insert(alias_owned.clone(), e.to_string());
@@ -2006,6 +2045,7 @@ async fn trigger_symbol_rebuild(
                 alias_owned,
                 e
             );
+            state.active_reindexes.remove(&alias_owned);
             state
                 .csharp_index_error
                 .insert(alias_owned.clone(), format!("Task panicked: {}", e));
