@@ -72,7 +72,7 @@ Exactly 4 `Arc::new(SymbolIndexerRegistry::new())` sites:
 
 - [ ] CI green on GitHub Actions for `csharp-integration-tests` job *(first run after push)*
 - [ ] `REVIEW_features-symbol-references.md` closing section "Fixes applied" with commit SHAs
-- [ ] Manual end-test on real Aprimo client repo: 2nd/3rd `find_impact` call < 100ms
+- [ ] Manual end-test on real client repo: 2nd/3rd `find_impact` call < 100ms
 - [ ] 49 minors from review — separate in next iteration
 - [ ] Follow-up majors: rebuild scope, sequential text+symbol rebuild, git rev-parse subprocess, per-repo mutex for parallel rebuilds
 - [x] LMDB `map_size` — **fixed**: SCIP LMDB raised from 64 MB → 512 MB (virtual); env-var override `CODESEARCH_SCIP_LMDB_MAP_MB`

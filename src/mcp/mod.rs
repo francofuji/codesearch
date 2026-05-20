@@ -5294,9 +5294,9 @@ impl CodesearchService {
 
         // Two-pass fallback: if alias-stripping changed the path and yielded no results,
         // try the original un-stripped path. Handles the case where the project alias
-        // matches a package subdirectory name (e.g. project "aprimo_mcp" with target
-        // "aprimo_mcp/config.py" → after strip becomes "config.py" which is wrong;
-        // the correct relative path is "aprimo_mcp/config.py").
+        // matches a package subdirectory name (e.g. project "my_pkg" with target
+        // "my_pkg/config.py" → after strip becomes "config.py" which is wrong;
+        // the correct relative path is "my_pkg/config.py").
         if items.is_empty() && stripped_path != request.path {
             let normalized_orig = normalize_tool_path(&request.path, &project_root);
             if normalized_orig != normalized {
