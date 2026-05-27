@@ -1,0 +1,17 @@
+services:
+  codesearch:
+    build: .
+    ports:
+      - "39725:39725"
+    environment:
+      CODESEARCH_SERVE_HOST: 0.0.0.0
+      CODESEARCH_SERVE_PORT: 39725
+    volumes:
+      - ${HOME}/.codesearch:/root/.codesearch
+      - .:/repos/codesearch:ro
+    command:
+      - codesearch
+      - serve
+      - --no-tui
+      - --register
+      - /repos/codesearch

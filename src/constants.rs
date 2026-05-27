@@ -146,8 +146,15 @@ pub const WRITER_LOCK_FILE: &str = ".writer.lock";
 /// Override with `--port` or `CODESEARCH_SERVE_PORT`.
 pub const DEFAULT_SERVE_PORT: u16 = 39725;
 
+/// Default host/interface for `codesearch serve`.
+/// Override with `--host` or `CODESEARCH_SERVE_HOST`.
+pub const DEFAULT_SERVE_HOST: &str = "127.0.0.1";
+
 /// Environment variable to override the serve port.
 pub const SERVE_PORT_ENV: &str = "CODESEARCH_SERVE_PORT";
+
+/// Environment variable to override the serve host/interface.
+pub const SERVE_HOST_ENV: &str = "CODESEARCH_SERVE_HOST";
 
 /// Default base URL for connecting to a local `codesearch serve` instance.
 /// Used as the clap `--url` default and in `serve_base_url()`.
