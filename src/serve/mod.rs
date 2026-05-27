@@ -1,6 +1,6 @@
 //! `codesearch serve` — MCP streamable HTTP server mode.
 //!
-//! Binds on `127.0.0.1:{port}` and serves:
+//! Binds on `{host}:{port}` and serves:
 //! - `GET /health` → JSON health check
 //! - `POST /repos` → register + index + warmup a new repo
 //! - `DELETE /repos/:alias` → stop FSW + evict + unregister + delete DB
@@ -34,9 +34,9 @@ use tracing::{info, warn};
 
 use crate::constants::{
     CSHARP_PREWARM_ENABLED_ENV, CSHARP_PREWARM_MAX_SYMBOLS, CSHARP_SCIP_CONCURRENCY_DEFAULT,
-    CSHARP_SCIP_CONCURRENCY_ENV, DB_DIR_NAME, DEFAULT_SERVE_PORT, HEALTH_PATH, LANG_CSHARP,
-    MCP_ENDPOINT_PATH, PERSIST_DEBOUNCE_SECS, REAPER_INTERVAL_SECS, REPO_IDLE_TIMEOUT_ENV,
-    REPO_IDLE_TIMEOUT_SECS, SERVE_PORT_ENV, STATUS_PATH,
+    CSHARP_SCIP_CONCURRENCY_ENV, DB_DIR_NAME, DEFAULT_SERVE_HOST, DEFAULT_SERVE_PORT,
+    HEALTH_PATH, LANG_CSHARP, MCP_ENDPOINT_PATH, PERSIST_DEBOUNCE_SECS, REAPER_INTERVAL_SECS,
+    REPO_IDLE_TIMEOUT_ENV, REPO_IDLE_TIMEOUT_SECS, SERVE_HOST_ENV, SERVE_PORT_ENV, STATUS_PATH,
 };
 use crate::db_discovery::repos::ReposConfig;
 use crate::index::{CSharpRebuildNotifier, IndexManager, IndexingStatusCallback, SharedStores};
@@ -2770,11 +2770,18 @@ pub async fn run_tui_standalone(serve_url: String) -> Result<()> {
 ///
 /// This is the entry point called from CLI when `codesearch serve` is invoked.
 pub async fn run_serve(
+    host: Option<String>,
     port: Option<u16>,
     register_paths: Vec<PathBuf>,
     no_tui: bool,
     cancel_token: CancellationToken,
 ) -> Result<()> {
+    let effective_host = host.unwrap_or_else(|| {
+        std::env::var(SERVE_HOST_ENV)
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_SERVE_HOST.to_string())
+    });
     let effective_port = port.unwrap_or_else(|| {
         std::env::var(SERVE_PORT_ENV)
             .ok()
@@ -2805,7 +2812,9 @@ pub async fn run_serve(
     let serve_state = Arc::new(ServeState::new(config, None));
 
     // Log startup
-    let addr = SocketAddr::from(([127, 0, 0, 1], effective_port));
+    let addr: SocketAddr = format!("{}:{}", effective_host, effective_port)
+        .parse()
+        .context("Invalid serve host/port combination")?;
     info!(
         "🚀 Starting codesearch serve v{} on {}",
         env!("CARGO_PKG_VERSION"),

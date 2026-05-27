@@ -350,6 +350,33 @@ codesearch mcp --mode client  # force serve connection
 
 The serve endpoint is available at `/mcp` (Streamable HTTP transport).
 
+### Docker / Headless Serve
+
+For containerized or daemon-style deployments, disable the embedded TUI and bind
+to `0.0.0.0` inside the container:
+
+```bash
+codesearch serve --host 0.0.0.0 --no-tui
+```
+
+The same can be configured with environment variables:
+
+```bash
+CODESEARCH_SERVE_HOST=0.0.0.0 CODESEARCH_SERVE_PORT=39725 codesearch serve --no-tui
+```
+
+When running in Docker, mount both the global config directory and the repositories
+you want to index:
+
+```bash
+docker run --rm \
+  -p 39725:39725 \
+  -v "$HOME/.codesearch:/root/.codesearch" \
+  -v "/path/to/repos:/repos" \
+  codesearch:local \
+  codesearch serve --host 0.0.0.0 --no-tui --register /repos/my-project
+```
+
 ## CLI Reference
 
 | Command | Description |
@@ -371,6 +398,7 @@ The serve endpoint is available at `/mcp` (Streamable HTTP transport).
 
 | Variable | Description |
 |----------|-------------|
+| `CODESEARCH_SERVE_HOST` | Serve mode host/interface (default: `127.0.0.1`) |
 | `CODESEARCH_SERVE_PORT` | Serve mode port (default: 39725) |
 | `CODESEARCH_MCP_MODE` | MCP mode: auto, client, local |
 | `CODESEARCH_REPOS_CONFIG` | Path to repos.json |
